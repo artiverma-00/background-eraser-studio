@@ -49,9 +49,10 @@ const Index = () => {
         try {
           setStatus("Saving to cloud...");
           await uploadProcessedImage(user.uid, originalFileRef.current, processedBlob);
+          toast.info("Image saved to your history!");
         } catch (err) {
           console.error("Failed to save to cloud:", err);
-          // Don't block the user, just warn
+          toast.warning("Could not save to cloud. Check Firebase Storage rules.");
         }
       }
       
