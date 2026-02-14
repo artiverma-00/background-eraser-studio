@@ -1,105 +1,93 @@
-import { pipeline, env, RawImage } from '@huggingface/transformers';
+import { AutoModel, AutoProcessor, RawImage, env } from '@huggingface/transformers';
 
-// Configure transformers.js to always download models
+// Configure transformers.js
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 const MAX_IMAGE_DIMENSION = 1024;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let segmenter: any = null;
-
-function resizeImageIfNeeded(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, image: HTMLImageElement) {
-  let width = image.naturalWidth;
-  let height = image.naturalHeight;
-
-  if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-    if (width > height) {
-      height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
-      width = MAX_IMAGE_DIMENSION;
-    } else {
-      width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
-      height = MAX_IMAGE_DIMENSION;
-    }
-
-    canvas.width = width;
-    canvas.height = height;
-    ctx.drawImage(image, 0, 0, width, height);
-    return true;
-  }
-
-  canvas.width = width;
-  canvas.height = height;
-  ctx.drawImage(image, 0, 0);
-  return false;
-}
+let model: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let processor: any = null;
 
 export const removeBackground = async (
   imageElement: HTMLImageElement,
   onProgress?: (progress: number, status: string) => void
 ): Promise<Blob> => {
   try {
-    onProgress?.(10, 'Loading AI model...');
-    
-    if (!segmenter) {
-      segmenter = await pipeline(
-        'image-segmentation',
-        'Xenova/segformer-b0-finetuned-ade-512-512',
-        { device: 'webgpu' as const }
-      );
+    onProgress?.(5, 'Loading AI model...');
+
+    if (!model || !processor) {
+      model = await AutoModel.from_pretrained('briaai/RMBG-1.4', {
+        device: 'wasm',
+      });
+      processor = await AutoProcessor.from_pretrained('briaai/RMBG-1.4');
     }
-    
-    onProgress?.(40, 'Processing image...');
-    
+
+    onProgress?.(30, 'Processing image...');
+
+    // Resize if needed
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    
     if (!ctx) throw new Error('Could not get canvas context');
-    
-    resizeImageIfNeeded(canvas, ctx, imageElement);
-    
-    const imageData = canvas.toDataURL('image/jpeg', 0.8);
-    
-    onProgress?.(60, 'Analyzing image...');
-    
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await segmenter(imageData) as any[];
-    
+
+    let width = imageElement.naturalWidth;
+    let height = imageElement.naturalHeight;
+
+    if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+      if (width > height) {
+        height = Math.round((height * MAX_IMAGE_DIMENSION) / width);
+        width = MAX_IMAGE_DIMENSION;
+      } else {
+        width = Math.round((width * MAX_IMAGE_DIMENSION) / height);
+        height = MAX_IMAGE_DIMENSION;
+      }
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    ctx.drawImage(imageElement, 0, 0, width, height);
+
+    onProgress?.(40, 'Analyzing image...');
+
+    // Load image for the model
+    const image = await RawImage.fromURL(canvas.toDataURL('image/png'));
+    const { pixel_values } = await processor(image);
+
+    onProgress?.(60, 'Running AI model...');
+
+    const { output } = await model({ input: pixel_values });
+
     onProgress?.(80, 'Removing background...');
-    
-    if (!result || !Array.isArray(result) || result.length === 0 || !result[0].mask) {
-      throw new Error('Invalid segmentation result');
-    }
-    
+
+    // Process the mask
+    const maskData = await RawImage.fromTensor(output[0].mul(255).to('uint8')).resize(width, height);
+
+    // Create output canvas with transparency
     const outputCanvas = document.createElement('canvas');
-    outputCanvas.width = canvas.width;
-    outputCanvas.height = canvas.height;
+    outputCanvas.width = width;
+    outputCanvas.height = height;
     const outputCtx = outputCanvas.getContext('2d');
-    
     if (!outputCtx) throw new Error('Could not get output canvas context');
-    
+
     outputCtx.drawImage(canvas, 0, 0);
-    
-    const outputImageData = outputCtx.getImageData(0, 0, outputCanvas.width, outputCanvas.height);
+    const outputImageData = outputCtx.getImageData(0, 0, width, height);
     const data = outputImageData.data;
-    
-    for (let i = 0; i < result[0].mask.data.length; i++) {
-      const alpha = Math.round((1 - result[0].mask.data[i]) * 255);
-      data[i * 4 + 3] = alpha;
+
+    for (let i = 0; i < maskData.data.length; i++) {
+      data[i * 4 + 3] = maskData.data[i]; // Set alpha from mask
     }
-    
+
     outputCtx.putImageData(outputImageData, 0, 0);
-    
+
     onProgress?.(100, 'Complete!');
-    
+
     return new Promise((resolve, reject) => {
       outputCanvas.toBlob(
         (blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error('Failed to create blob'));
-          }
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to create blob'));
         },
         'image/png',
         1.0
