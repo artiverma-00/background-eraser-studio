@@ -1,16 +1,12 @@
 import { useState, useCallback, useRef } from "react";
-import { Sparkles, Zap, Shield, Wand2, LogIn, LogOut, Clock, User } from "lucide-react";
+import { Sparkles, Zap, Shield, Wand2 } from "lucide-react";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DropZone } from "@/components/DropZone";
 import { ProcessingProgress } from "@/components/ProcessingProgress";
 import { ImageComparison } from "@/components/ImageComparison";
 import { ActionButtons } from "@/components/ActionButtons";
 import { removeBackground, loadImage } from "@/lib/backgroundRemoval";
-import { uploadProcessedImage } from "@/lib/firebaseStorage";
-import { useAuth } from "@/contexts/AuthContext";
-import { Button } from "@/components/ui/button";
 
 type AppState = "idle" | "processing" | "complete";
 
@@ -20,16 +16,12 @@ const Index = () => {
   const [status, setStatus] = useState("");
   const [originalUrl, setOriginalUrl] = useState<string>("");
   const [processedUrl, setProcessedUrl] = useState<string>("");
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  const originalFileRef = useRef<File | null>(null);
 
   const handleFileSelect = useCallback(async (file: File) => {
     try {
       setState("processing");
       setProgress(0);
       setStatus("Loading image...");
-      originalFileRef.current = file;
 
       const originalObjectUrl = URL.createObjectURL(file);
       setOriginalUrl(originalObjectUrl);
@@ -43,18 +35,6 @@ const Index = () => {
 
       const processedObjectUrl = URL.createObjectURL(processedBlob);
       setProcessedUrl(processedObjectUrl);
-
-      // Save to Firebase if logged in
-      if (user && originalFileRef.current) {
-        try {
-          setStatus("Saving to cloud...");
-          await uploadProcessedImage(user.uid, originalFileRef.current, processedBlob);
-          toast.info("Image saved to your history!");
-        } catch (err) {
-          console.error("Failed to save to cloud:", err);
-          toast.warning("Could not save to cloud. Check Firebase Storage rules.");
-        }
-      }
       
       setState("complete");
       toast.success("Background removed successfully!");
@@ -63,7 +43,7 @@ const Index = () => {
       toast.error("Failed to process image. Please try again.");
       setState("idle");
     }
-  }, [user]);
+  }, []);
 
   const handleReset = useCallback(() => {
     if (originalUrl) URL.revokeObjectURL(originalUrl);
@@ -73,7 +53,6 @@ const Index = () => {
     setState("idle");
     setProgress(0);
     setStatus("");
-    originalFileRef.current = null;
   }, [originalUrl, processedUrl]);
 
   return (
@@ -90,46 +69,7 @@ const Index = () => {
               <span className="text-foreground">Remove</span>
             </h1>
           </div>
-          <div className="flex items-center gap-3">
-            {user ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate("/history")}
-                  className="rounded-xl text-muted-foreground hover:text-foreground"
-                >
-                  <Clock className="w-4 h-4 mr-1.5" />
-                  <span className="hidden sm:inline">History</span>
-                </Button>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-secondary text-sm">
-                  <User className="w-3.5 h-3.5 text-primary" />
-                  <span className="hidden sm:inline text-foreground truncate max-w-[120px]">
-                    {user.displayName || user.email?.split("@")[0]}
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { logout(); toast.success("Logged out"); }}
-                  className="rounded-xl text-muted-foreground hover:text-foreground"
-                >
-                  <LogOut className="w-4 h-4" />
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate("/auth")}
-                className="rounded-xl text-muted-foreground hover:text-foreground"
-              >
-                <LogIn className="w-4 h-4 mr-1.5" />
-                Sign In
-              </Button>
-            )}
-            <ThemeToggle />
-          </div>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -149,15 +89,8 @@ const Index = () => {
           </h2>
           
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Upload any image and watch AI instantly remove the background. 
-            {!user && (
-              <span className="block mt-2 text-sm">
-                <button onClick={() => navigate("/auth")} className="text-primary font-semibold hover:underline">
-                  Sign in
-                </button>
-                {" "}to save your processed images and view history.
-              </span>
-            )}
+            Upload any image and watch AI instantly remove the background.
+            No registration required.
           </p>
         </section>
 
